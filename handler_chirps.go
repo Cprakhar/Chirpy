@@ -7,21 +7,31 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Cprakhar/Chirpy/internal/auth"
 	"github.com/Cprakhar/Chirpy/internal/database"
 	"github.com/google/uuid"
 )
 
 type chirpBody struct {
 	Body string `json:"body"`
-	UserId uuid.UUID `json:"user_id"`
 }
 
 func (apiCfg *apiConfig) handleCreateChirp(w http.ResponseWriter, r *http.Request) {
+	tokenString, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		responseWithError(w, 401, fmt.Sprintf("Unauthorized: %v", err))
+		return
+	}
+	userId, err := auth.ValidateJWT(tokenString, apiCfg.tokenSecret)
+	if err != nil {
+		responseWithError(w, 401, fmt.Sprintf("No authorized: %v", err))
+		return
+	}
 
 	var chirp chirpBody
 
 	decoder := json.NewDecoder(r.Body)
-	err := decoder.Decode(&chirp)
+	err = decoder.Decode(&chirp)
 	if err != nil {
 		responseWithError(w, 400, "Something went wrong")
 		return
@@ -46,7 +56,7 @@ func (apiCfg *apiConfig) handleCreateChirp(w http.ResponseWriter, r *http.Reques
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
 		Body: cleanedChirp,
-		UserID: chirp.UserId,
+		UserID: userId,
 	})
 	if err != nil {
 		responseWithError(w, 400, fmt.Sprintf("Couldn't create a chirp: %v", err))
@@ -78,6 +88,34 @@ func (apiCfg *apiConfig) handleGetChirpByID(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	responseWithJSON(w, 200, databaseChirpToChirp(chirp))
+}
+
+func (apiCfg *apiConfig) handleDeleteChirp(w http.ResponseWriter, r *http.Request) {
+	tokenString, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		responseWithError(w, 401, fmt.Sprintf("Unauthorized: %v", err))
+		return
+	}
+	userId, err := auth.ValidateJWT(tokenString, apiCfg.tokenSecret)
+	if err != nil {
+		responseWithError(w, 401, fmt.Sprintf("Unauthorized: %v", err))
+		return
+	}
+
+	chirpId, err := uuid.Parse(r.PathValue("chirpID"))
+	if err != nil {
+		responseWithError(w, 400, fmt.Sprintf("Couldn't parse the uuid: %v", err))
+		return
+	}
+	err = apiCfg.dbQueries.DeleteChirpByID(r.Context(), database.DeleteChirpByIDParams{
+		UserID: userId,
+		ID: chirpId,
+	})
+	if err != nil {
+		responseWithError(w, 404, fmt.Sprintf("User not the owner or chirp not found: %v", err))
+		return
+	}
+	responseWithJSON(w, 204, struct{}{})
 }
 
 

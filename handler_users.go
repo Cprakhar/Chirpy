@@ -1,14 +1,15 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
 
+	"github.com/Cprakhar/Chirpy/internal/auth"
 	"github.com/Cprakhar/Chirpy/internal/database"
 	"github.com/google/uuid"
-	"github.com/Cprakhar/Chirpy/internal/auth"
 )
 
 type LoginUser struct {
@@ -58,14 +59,78 @@ func (apiCfg *apiConfig) handleUserLogin(w http.ResponseWriter, r *http.Request)
 		responseWithError(w, 401, "Incorrect email or password")
 		return
 	}
-	err = auth.CheckHashPassword(user.Password, logUser.HashedPassword)
+	defaultExpiresInSeconds := time.Hour.Seconds()
+	tokenString, err := auth.MakeJWT(logUser.ID, apiCfg.tokenSecret, time.Duration(defaultExpiresInSeconds)*time.Second)
 	if err != nil {
-		responseWithError(w, 401, "Incorrect email or password")
+		responseWithError(w, 401, fmt.Sprintf("Error logging user: %v", err))
 		return
 	}
-	responseWithJSON(w, 200, databaseUserToUser(logUser))
+	refreshToken, err := auth.MakeRefreshToken()
+	if err != nil {
+		responseWithError(w, 401, fmt.Sprintf("Error logging user: %v", err))
+		return
+	}
+	_, err = apiCfg.dbQueries.CreateRefreshToken(r.Context(), database.CreateRefreshTokenParams{
+		Token: refreshToken,
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+		UserID: logUser.ID,
+		ExpiresAt: time.Now().Add(time.Hour * 24 * 60),
+		RevokedAt: sql.NullTime{},
+	})
+	if err != nil {
+		responseWithError(w, 400, fmt.Sprintf("Couldn't save the refresh token in the database: %v", err))
+		return
+	}
+	
+	loggedUser := LoggedUser{
+		ID: logUser.ID,
+		CreatedAt: logUser.CreatedAt,
+		UpdatedAt: logUser.UpdatedAt,
+		Email: logUser.Email,
+		Token: tokenString,
+		RefreshToken: refreshToken,
+	}
+	responseWithJSON(w, 200, loggedUser)
 }
 
+func (apiCfg *apiConfig) handleUpdateLoginDetails (w http.ResponseWriter, r *http.Request) {
+	var user LoginUser
+	err := json.NewDecoder(r.Body).Decode(&user)
+	if err != nil {
+		responseWithError(w, 400, fmt.Sprintf("Couldn't parse the JSON: %v", err))
+		return
+	}
+	defer r.Body.Close()
+
+	tokenString, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		responseWithError(w, 401, fmt.Sprintf("Unauthorized: %v", err))
+		return
+	}
+	userId, err := auth.ValidateJWT(tokenString, apiCfg.tokenSecret)
+	if err != nil {
+		responseWithError(w, 401, fmt.Sprintf("Unauthorized: %v", err))
+		return
+	}
+	hashedPasswd, err := auth.HashPassword(user.Password)
+	if err != nil {
+		responseWithError(w, 500, fmt.Sprintf("Couldn't change the password: %v", err))
+		return
+	}
+
+	updatedUser, err := apiCfg.dbQueries.UpdateUser(r.Context(), database.UpdateUserParams{
+		Email: user.Email,
+		HashedPassword: hashedPasswd,
+		UpdatedAt: time.Now().UTC(),
+		ID: userId,
+	})
+	if err != nil {
+		responseWithError(w, 404, fmt.Sprintf("Couldn't found the user: %v", err))
+		return
+	}
+	responseWithJSON(w, 200, databaseUserToUser(updatedUser))
+}
 
 func (apiCfg *apiConfig) handleDeleteAllUsers(w http.ResponseWriter, r *http.Request){
 	if apiCfg.platform != "dev" {

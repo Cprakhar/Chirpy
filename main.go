@@ -17,6 +17,7 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbQueries *database.Queries
 	platform string
+	tokenSecret string
 }
 
 func main() {
@@ -27,6 +28,7 @@ func main() {
 
 	dbURL := os.Getenv("DB_URL")
 	platform := os.Getenv("PLATFORM")
+	tokenSecret := os.Getenv("TOKEN_SECRET")
 
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
@@ -38,6 +40,7 @@ func main() {
 	apiCfg := apiConfig{
 		dbQueries: dbQueries,
 		platform: platform,
+		tokenSecret: tokenSecret,
 	}
 
 	serveMux := http.NewServeMux()
@@ -55,11 +58,15 @@ func main() {
 	serveMux.HandleFunc("GET /api/chirps", apiCfg.handleGetAllChirps)
 	serveMux.HandleFunc("POST /api/chirps", apiCfg.handleCreateChirp)
 	serveMux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.handleGetChirpByID)
+	serveMux.HandleFunc("DELETE /api/chirps/{chirpID}", apiCfg.handleDeleteChirp)
 
 	serveMux.HandleFunc("POST /api/users", apiCfg.handleCreateUser)
 	serveMux.HandleFunc("POST /api/login", apiCfg.handleUserLogin)
+	serveMux.HandleFunc("PUT /api/users", apiCfg.handleUpdateLoginDetails)
 
 	serveMux.HandleFunc("DELETE /admin/reset", apiCfg.handleDeleteAllUsers)
+	serveMux.HandleFunc("POST /api/refresh", apiCfg.handleRefreshToken)
+	serveMux.HandleFunc("POST /api/revoke", apiCfg.handleRevokeToken)
 
 
 	fmt.Printf("Server running at port 8080, Platform: %s\n", platform)
