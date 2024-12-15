@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -67,11 +68,32 @@ func (apiCfg *apiConfig) handleCreateChirp(w http.ResponseWriter, r *http.Reques
 }
 
 func (apiCfg *apiConfig) handleGetAllChirps(w http.ResponseWriter, r *http.Request) {
-	chirps, err := apiCfg.dbQueries.GetAllChirps(r.Context())
-	if err != nil {
-		responseWithError(w, 404, fmt.Sprintf("Couldn't retrieve all chirps: %v", err))
+	authorId := r.URL.Query().Get("author_id")
+	sort := r.URL.Query().Get("sort")
+	if authorId == "" {
+		chirps, err := apiCfg.dbQueries.GetAllChirps(r.Context())
+		if err != nil {
+			responseWithError(w, 404, fmt.Sprintf("Couldn't retrieve all chirps: %v", err))
+			return
+		}
+		sortedChirps(chirps, sort)
+		responseWithJSON(w, 200, databaseChirpsToChirps(chirps))
+		return
 	}
+
+	parsedAuthorId, err := uuid.Parse(authorId)
+	if err != nil {
+		responseWithError(w, 400, fmt.Sprintf("Error parsing: %v", err))
+		return
+	}
+	chirps, err := apiCfg.dbQueries.GetAllChirpsByUserID(r.Context(), parsedAuthorId)
+	if err != nil {
+		responseWithError(w, 404, fmt.Sprintf("No user found: %v", err))
+		return
+	}
+	sortedChirps(chirps, sort)
 	responseWithJSON(w, 200, databaseChirpsToChirps(chirps))
+	
 }
 
 func (apiCfg *apiConfig) handleGetChirpByID(w http.ResponseWriter, r *http.Request) {
@@ -116,6 +138,16 @@ func (apiCfg *apiConfig) handleDeleteChirp(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	responseWithJSON(w, 204, struct{}{})
+}
+
+
+func sortedChirps(chirps []database.Chirp, sortby string) {
+	sort.Slice(chirps, func(i, j int) bool {
+		if sortby == "asc" || sortby == "" {
+			return chirps[i].CreatedAt.Before(chirps[j].CreatedAt)
+		}
+		return chirps[j].CreatedAt.Before(chirps[i].CreatedAt)
+	})
 }
 
 

@@ -14,3 +14,7 @@ WHERE id = $1;
 -- name: DeleteChirpByID :exec
 DELETE FROM chirps
 WHERE id = $1 AND user_id = $2;
+
+-- name: GetAllChirpsByUserID :many
+SELECT * FROM chirps
+WHERE user_id = $1;

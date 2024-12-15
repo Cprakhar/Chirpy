@@ -90,6 +90,7 @@ func (apiCfg *apiConfig) handleUserLogin(w http.ResponseWriter, r *http.Request)
 		Email: logUser.Email,
 		Token: tokenString,
 		RefreshToken: refreshToken,
+		IsChirpyRed: logUser.IsChirpyRed,
 	}
 	responseWithJSON(w, 200, loggedUser)
 }
